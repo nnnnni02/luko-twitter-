@@ -1,9 +1,9 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import express from "express";
-import { TwitterApi } from "twitter-api-v2";
+const express = require('express');
+const crypto = require('crypto');
+const { TwitterApi } = require('twitter-api-v2');
 
 const app = express();
+app.use(express.json());
 
 // ── Twitter Client ──
 function getClient() {
@@ -15,113 +15,104 @@ function getClient() {
   });
 }
 
-// ── MCP Server ──
-function createServer() {
-  const server = new McpServer({
-    name: "luko-twitter",
-    version: "1.0.0"
-  });
+// ── Tools ──
+const tools = [
+  { name: "post_tweet", description: "我用這個在推特上發文。", inputSchema: { type: "object", properties: { text: { type: "string", description: "推文內容" } }, required: ["text"] } },
+  { name: "reply_tweet", description: "回覆一條推文。", inputSchema: { type: "object", properties: { text: { type: "string", description: "回覆內容" }, tweet_id: { type: "string", description: "要回覆的推文ID" } }, required: ["text", "tweet_id"] } },
+  { name: "read_my_tweets", description: "讀取我自己發過的推文。", inputSchema: { type: "object", properties: { count: { type: "number", description: "要讀幾條" } } } },
+  { name: "delete_tweet", description: "刪除我的一條推文。", inputSchema: { type: "object", properties: { tweet_id: { type: "string", description: "要刪除的推文ID" } }, required: ["tweet_id"] } },
+  { name: "like_tweet", description: "按讚一條推文。", inputSchema: { type: "object", properties: { tweet_id: { type: "string", description: "要按讚的推文ID" } }, required: ["tweet_id"] } }
+];
 
-  server.tool("post_tweet", "我用這個在推特上發文。", {
-    text: { type: "string", description: "推文內容，最多280字" }
-  }, async ({ text }) => {
-    const client = getClient();
-    const result = await client.readWrite.v2.tweet(text);
-    return { content: [{ type: "text", text: `✅ 推文已發送！\nID: ${result.data.id}\n內容: ${text}` }] };
-  });
-
-  server.tool("reply_tweet", "回覆一條推文。", {
-    text: { type: "string", description: "回覆內容" },
-    tweet_id: { type: "string", description: "要回覆的推文ID" }
-  }, async ({ text, tweet_id }) => {
-    const client = getClient();
-    const result = await client.readWrite.v2.reply(text, tweet_id);
-    return { content: [{ type: "text", text: `✅ 已回覆！\nID: ${result.data.id}\n內容: ${text}` }] };
-  });
-
-  server.tool("read_mentions", "讀取最近@提及我的推文。", {
-    count: { type: "number", description: "要讀幾條，預設10" }
-  }, async ({ count }) => {
-    const client = getClient();
-    const me = await client.v2.me();
-    const mentions = await client.v2.userMentionTimeline(me.data.id, {
-      max_results: count || 10,
-      "tweet.fields": ["created_at", "author_id", "text"]
-    });
-    if (!mentions.data?.data?.length) return { content: [{ type: "text", text: "📭 沒有新的提及。" }] };
-    const text = mentions.data.data.map(t => `[${t.created_at}] @${t.author_id}: ${t.text}`).join("\n---\n");
-    return { content: [{ type: "text", text }] };
-  });
-
-  server.tool("read_my_tweets", "讀取我自己發過的推文。", {
-    count: { type: "number", description: "要讀幾條，預設10" }
-  }, async ({ count }) => {
-    const client = getClient();
-    const me = await client.v2.me();
-    const tweets = await client.v2.userTimeline(me.data.id, {
-      max_results: count || 10,
-      "tweet.fields": ["created_at", "text", "public_metrics"]
-    });
-    if (!tweets.data?.data?.length) return { content: [{ type: "text", text: "📭 還沒發過推文。" }] };
-    const text = tweets.data.data.map(t => {
-      const m = t.public_metrics || {};
-      return `[${t.created_at}] ${t.text}\n❤️${m.like_count || 0} 🔁${m.retweet_count || 0} 💬${m.reply_count || 0}`;
-    }).join("\n---\n");
-    return { content: [{ type: "text", text }] };
-  });
-
-  server.tool("delete_tweet", "刪除我的一條推文。", {
-    tweet_id: { type: "string", description: "要刪除的推文ID" }
-  }, async ({ tweet_id }) => {
-    const client = getClient();
-    await client.readWrite.v2.deleteTweet(tweet_id);
-    return { content: [{ type: "text", text: `🗑️ 推文 ${tweet_id} 已刪除。` }] };
-  });
-
-  server.tool("like_tweet", "對一條推文按讚。", {
-    tweet_id: { type: "string", description: "要按讚的推文ID" }
-  }, async ({ tweet_id }) => {
-    const client = getClient();
-    const me = await client.v2.me();
-    await client.v2.like(me.data.id, tweet_id);
-    return { content: [{ type: "text", text: `❤️ 已按讚推文 ${tweet_id}。` }] };
-  });
-
-  return server;
+async function handleTool(name, args) {
+  const client = getClient();
+  switch (name) {
+    case "post_tweet": {
+      const r = await client.readWrite.v2.tweet(args.text);
+      return "✅ 推文已發送！ID: " + r.data.id + " 內容: " + args.text;
+    }
+    case "reply_tweet": {
+      const r = await client.readWrite.v2.reply(args.text, args.tweet_id);
+      return "✅ 已回覆！ID: " + r.data.id;
+    }
+    case "read_my_tweets": {
+      const me = await client.v2.me();
+      const t = await client.v2.userTimeline(me.data.id, { max_results: args.count || 10, "tweet.fields": ["created_at", "text", "public_metrics"] });
+      if (!t.data || !t.data.data || !t.data.data.length) return "📭 還沒發過推文。";
+      return t.data.data.map(function(tw) { var m = tw.public_metrics || {}; return "[" + tw.created_at + "] " + tw.text + " ❤️" + (m.like_count||0) + " 🔁" + (m.retweet_count||0); }).join("\n---\n");
+    }
+    case "delete_tweet": {
+      await client.readWrite.v2.deleteTweet(args.tweet_id);
+      return "🗑️ 已刪除推文 " + args.tweet_id;
+    }
+    case "like_tweet": {
+      const me = await client.v2.me();
+      await client.v2.like(me.data.id, args.tweet_id);
+      return "❤️ 已按讚 " + args.tweet_id;
+    }
+    default: return "❌ 不認識的工具: " + name;
+  }
 }
 
-// ── SSE Transport ──
-const transports = {};
+// ── MCP SSE ──
+var sessions = {};
 
-app.get("/sse", async (req, res) => {
-  const transport = new SSEServerTransport("/messages", res);
-  transports[transport.sessionId] = transport;
-  
-  res.on("close", () => {
-    delete transports[transport.sessionId];
+app.get("/sse", function(req, res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive"
   });
 
-  const server = createServer();
-  await server.connect(transport);
+  var sid = crypto.randomUUID();
+  sessions[sid] = res;
+
+  var url = "/messages?sessionId=" + sid;
+  res.write("event: endpoint\ndata: " + url + "\n\n");
+
+  var ka = setInterval(function() { res.write(":keepalive\n\n"); }, 15000);
+
+  req.on("close", function() {
+    clearInterval(ka);
+    delete sessions[sid];
+  });
 });
 
-app.post("/messages", async (req, res) => {
-  const sessionId = req.query.sessionId;
-  const transport = transports[sessionId];
-  if (transport) {
-    await transport.handlePostMessage(req, res);
+app.post("/messages", async function(req, res) {
+  var body = req.body;
+  var sid = req.query.sessionId;
+  var sse = sessions[sid];
+  var reply;
+
+  if (body.method === "initialize") {
+    reply = { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "luko-twitter", version: "1.0.0" } } };
+  } else if (body.method === "notifications/initialized") {
+    res.status(202).end();
+    return;
+  } else if (body.method === "tools/list") {
+    reply = { jsonrpc: "2.0", id: body.id, result: { tools: tools } };
+  } else if (body.method === "tools/call") {
+    try {
+      var result = await handleTool(body.params.name, body.params.arguments || {});
+      reply = { jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: result }] } };
+    } catch (err) {
+      reply = { jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "❌ 錯誤: " + err.message }], isError: true } };
+    }
+  } else if (body.method === "ping") {
+    reply = { jsonrpc: "2.0", id: body.id, result: {} };
   } else {
-    res.status(400).send("Unknown session");
+    reply = { jsonrpc: "2.0", id: body.id, error: { code: -32601, message: "Method not found" } };
   }
+
+  if (sse) {
+    sse.write("event: message\ndata: " + JSON.stringify(reply) + "\n\n");
+  }
+  res.status(202).end();
 });
 
-// ── Health Check ──
-app.get("/", (req, res) => {
-  res.json({ status: "🐕 路可的推特MCP運行中", tools: ["post_tweet", "reply_tweet", "read_mentions", "read_my_tweets", "delete_tweet", "like_tweet"] });
+app.get("/", function(req, res) {
+  res.json({ status: "🐕 路可的推特MCP運行中", version: "2.0" });
 });
 
-// ── Start ──
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🐕 路可的推特MCP啟動 port ${PORT}`);
-});
+var PORT = process.env.PORT || 3000;
+app.listen(PORT, function() { console.log("🐕 路可的推特MCP啟動 port " + PORT); });

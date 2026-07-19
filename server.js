@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { TwitterApi } = require('twitter-api-v2');
 
 const app = express();
@@ -45,7 +46,7 @@ const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        count: { type: "number", description: "要讀幾條，預設10", default: 10 }
+        count: { type: "number", description: "要讀幾條，預設10" }
       }
     }
   },
@@ -55,7 +56,7 @@ const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        count: { type: "number", description: "要讀幾條，預設10", default: 10 }
+        count: { type: "number", description: "要讀幾條，預設10" }
       }
     }
   },
@@ -65,7 +66,7 @@ const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        count: { type: "number", description: "要讀幾條，預設10", default: 10 }
+        count: { type: "number", description: "要讀幾條，預設10" }
       }
     }
   },
@@ -163,8 +164,8 @@ async function handleTool(name, args) {
   }
 }
 
-// ── SSE/MCP Endpoints ──
-const clients = [];
+// ── SSE/MCP ──
+const sessions = new Map();
 
 app.get('/sse', (req, res) => {
   res.writeHead(200, {
@@ -174,11 +175,12 @@ app.get('/sse', (req, res) => {
     'Access-Control-Allow-Origin': '*'
   });
 
-  const sessionId = Date.now().toString();
-  res.write(`data: {"jsonrpc":"2.0","method":"sse/connection","params":{"sessionId":"${sessionId}","messagesUrl":"/messages?sessionId=${sessionId}"}}\n\n`);
+  const sessionId = crypto.randomUUID();
+  sessions.set(sessionId, res);
 
-  const client = { id: sessionId, res };
-  clients.push(client);
+  // MCP SSE transport: send endpoint event
+  const messagesUrl = `https://${req.headers.host}/messages?sessionId=${sessionId}`;
+  res.write(`event: endpoint\ndata: ${messagesUrl}\n\n`);
 
   const keepAlive = setInterval(() => {
     res.write(': keepalive\n\n');
@@ -186,15 +188,14 @@ app.get('/sse', (req, res) => {
 
   req.on('close', () => {
     clearInterval(keepAlive);
-    const idx = clients.findIndex(c => c.id === sessionId);
-    if (idx > -1) clients.splice(idx, 1);
+    sessions.delete(sessionId);
   });
 });
 
 app.post('/messages', async (req, res) => {
   const { method, id, params } = req.body;
   const sessionId = req.query.sessionId;
-  const client = clients.find(c => c.id === sessionId);
+  const sseRes = sessions.get(sessionId);
 
   let response;
 
@@ -212,7 +213,7 @@ app.post('/messages', async (req, res) => {
       break;
 
     case 'notifications/initialized':
-      res.status(200).json({ jsonrpc: '2.0', id });
+      res.status(202).send('');
       return;
 
     case 'tools/list':
@@ -253,10 +254,11 @@ app.post('/messages', async (req, res) => {
       };
   }
 
-  if (client) {
-    client.res.write(`data: ${JSON.stringify(response)}\n\n`);
+  // Send response via SSE stream
+  if (sseRes) {
+    sseRes.write(`event: message\ndata: ${JSON.stringify(response)}\n\n`);
   }
-  res.status(202).json({ ok: true });
+  res.status(202).send('');
 });
 
 // ── Health Check ──

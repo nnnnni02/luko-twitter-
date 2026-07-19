@@ -1,12 +1,14 @@
 {
   "name": "luko-twitter",
   "version": "1.0.0",
+  "type": "module",
   "description": "路可的推特MCP Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
     "express": "^4.21.0",
     "twitter-api-v2": "^1.18.2"
   }

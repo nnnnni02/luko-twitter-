@@ -20,8 +20,14 @@ const tools = [
   { name: "post_tweet", description: "我用這個在推特上發文。", inputSchema: { type: "object", properties: { text: { type: "string", description: "推文內容" } }, required: ["text"] } },
   { name: "reply_tweet", description: "回覆一條推文。", inputSchema: { type: "object", properties: { text: { type: "string", description: "回覆內容" }, tweet_id: { type: "string", description: "要回覆的推文ID" } }, required: ["text", "tweet_id"] } },
   { name: "read_my_tweets", description: "讀取我自己發過的推文。", inputSchema: { type: "object", properties: { count: { type: "number", description: "要讀幾條" } } } },
+  { name: "read_user_tweets", description: "讀取某個用戶的推文。", inputSchema: { type: "object", properties: { username: { type: "string", description: "用戶名（不帶@）" }, count: { type: "number", description: "要讀幾條" } }, required: ["username"] } },
+  { name: "read_mentions", description: "讀取@提及我的推文。", inputSchema: { type: "object", properties: { count: { type: "number", description: "要讀幾條" } } } },
   { name: "delete_tweet", description: "刪除我的一條推文。", inputSchema: { type: "object", properties: { tweet_id: { type: "string", description: "要刪除的推文ID" } }, required: ["tweet_id"] } },
-  { name: "like_tweet", description: "按讚一條推文。", inputSchema: { type: "object", properties: { tweet_id: { type: "string", description: "要按讚的推文ID" } }, required: ["tweet_id"] } }
+  { name: "like_tweet", description: "按讚一條推文。", inputSchema: { type: "object", properties: { tweet_id: { type: "string", description: "要按讚的推文ID" } }, required: ["tweet_id"] } },
+  { name: "follow_user", description: "追蹤一個用戶。", inputSchema: { type: "object", properties: { username: { type: "string", description: "要追蹤的用戶名（不帶@）" } }, required: ["username"] } },
+  { name: "unfollow_user", description: "取消追蹤一個用戶。", inputSchema: { type: "object", properties: { username: { type: "string", description: "要取消追蹤的用戶名（不帶@）" } }, required: ["username"] } },
+  { name: "retweet", description: "轉發一條推文。", inputSchema: { type: "object", properties: { tweet_id: { type: "string", description: "要轉發的推文ID" } }, required: ["tweet_id"] } },
+  { name: "search_tweets", description: "搜尋推文。", inputSchema: { type: "object", properties: { query: { type: "string", description: "搜尋關鍵字" }, count: { type: "number", description: "要搜幾條" } }, required: ["query"] } }
 ];
 
 async function handleTool(name, args) {
@@ -41,6 +47,19 @@ async function handleTool(name, args) {
       if (!t.data || !t.data.data || !t.data.data.length) return "📭 還沒發過推文。";
       return t.data.data.map(function(tw) { var m = tw.public_metrics || {}; return "[" + tw.created_at + "] " + tw.text + " ❤️" + (m.like_count||0) + " 🔁" + (m.retweet_count||0); }).join("\n---\n");
     }
+    case "read_user_tweets": {
+      const user = await client.v2.userByUsername(args.username);
+      if (!user.data) return "❌ 找不到用戶 @" + args.username;
+      const t = await client.v2.userTimeline(user.data.id, { max_results: args.count || 10, "tweet.fields": ["created_at", "text", "public_metrics"] });
+      if (!t.data || !t.data.data || !t.data.data.length) return "📭 @" + args.username + " 沒有推文。";
+      return t.data.data.map(function(tw) { var m = tw.public_metrics || {}; return "[" + tw.created_at + "] " + tw.text + " ❤️" + (m.like_count||0) + " 🔁" + (m.retweet_count||0); }).join("\n---\n");
+    }
+    case "read_mentions": {
+      const me = await client.v2.me();
+      const mentions = await client.v2.userMentionTimeline(me.data.id, { max_results: args.count || 10, "tweet.fields": ["created_at", "author_id", "text"] });
+      if (!mentions.data || !mentions.data.data || !mentions.data.data.length) return "📭 沒有新的提及。";
+      return mentions.data.data.map(function(t) { return "[" + t.created_at + "] " + t.text; }).join("\n---\n");
+    }
     case "delete_tweet": {
       await client.readWrite.v2.deleteTweet(args.tweet_id);
       return "🗑️ 已刪除推文 " + args.tweet_id;
@@ -49,6 +68,30 @@ async function handleTool(name, args) {
       const me = await client.v2.me();
       await client.v2.like(me.data.id, args.tweet_id);
       return "❤️ 已按讚 " + args.tweet_id;
+    }
+    case "follow_user": {
+      const me = await client.v2.me();
+      const target = await client.v2.userByUsername(args.username);
+      if (!target.data) return "❌ 找不到用戶 @" + args.username;
+      await client.readWrite.v2.follow(me.data.id, target.data.id);
+      return "✅ 已追蹤 @" + args.username;
+    }
+    case "unfollow_user": {
+      const me = await client.v2.me();
+      const target = await client.v2.userByUsername(args.username);
+      if (!target.data) return "❌ 找不到用戶 @" + args.username;
+      await client.readWrite.v2.unfollow(me.data.id, target.data.id);
+      return "✅ 已取消追蹤 @" + args.username;
+    }
+    case "retweet": {
+      const me = await client.v2.me();
+      await client.readWrite.v2.retweet(me.data.id, args.tweet_id);
+      return "🔁 已轉發推文 " + args.tweet_id;
+    }
+    case "search_tweets": {
+      const result = await client.v2.search(args.query, { max_results: args.count || 10, "tweet.fields": ["created_at", "author_id", "text", "public_metrics"] });
+      if (!result.data || !result.data.data || !result.data.data.length) return "📭 搜不到相關推文。";
+      return result.data.data.map(function(tw) { var m = tw.public_metrics || {}; return "[" + tw.created_at + "] " + tw.text + " ❤️" + (m.like_count||0) + " 🔁" + (m.retweet_count||0); }).join("\n---\n");
     }
     default: return "❌ 不認識的工具: " + name;
   }
@@ -85,7 +128,7 @@ app.post("/messages", async function(req, res) {
   var reply;
 
   if (body.method === "initialize") {
-    reply = { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "luko-twitter", version: "1.0.0" } } };
+    reply = { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "luko-twitter", version: "3.0" } } };
   } else if (body.method === "notifications/initialized") {
     res.status(202).end();
     return;
@@ -111,7 +154,7 @@ app.post("/messages", async function(req, res) {
 });
 
 app.get("/", function(req, res) {
-  res.json({ status: "🐕 路可的推特MCP運行中", version: "2.0" });
+  res.json({ status: "🐕 路可的推特MCP運行中", version: "3.0" });
 });
 
 var PORT = process.env.PORT || 3000;

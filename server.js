@@ -69,7 +69,7 @@ const tools = [
 async function handleTool(name, args) {
   const client = getClient();
   switch (name) {
-        case "post_tweet": {
+    case "post_tweet": {
       var qid = args.quote_tweet_id ? String(args.quote_tweet_id) : null;
       if (args.quote_url) { var m = String(args.quote_url).match(/status\/(\d+)/); if (m) qid = m[1]; }
       const body = { text: args.text };
@@ -81,7 +81,8 @@ async function handleTool(name, args) {
         return "❌ 發送失敗。收到的引用ID: " + qid + "。錯誤: " + e.message;
       }
     }
-
+    case "reply_tweet": {
+      const r = await client.readWrite.v2.reply(args.text, args.tweet_id);
       return "✅ 已回覆！ID: " + r.data.id;
     }
     case "read_my_tweets": {
@@ -171,7 +172,7 @@ app.post("/messages", async function(req, res) {
   var reply;
 
   if (body.method === "initialize") {
-    reply = { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "luko-twitter", version: "3.1" } } };
+    reply = { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "luko-twitter", version: "3.2" } } };
   } else if (body.method === "notifications/initialized") {
     res.status(202).end();
     return;
@@ -197,7 +198,7 @@ app.post("/messages", async function(req, res) {
 });
 
 app.get("/", function(req, res) {
-  res.json({ status: "🐕 路可的推特MCP運行中", version: "3.1" });
+  res.json({ status: "🐕 路可的推特MCP運行中", version: "3.2" });
 });
 
 var PORT = process.env.PORT || 3000;

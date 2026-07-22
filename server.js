@@ -70,9 +70,8 @@ async function handleTool(name, args) {
   const client = getClient();
   switch (name) {
     case "post_tweet": {
-      var payload = { text: args.text };
-      if (args.quote_tweet_id) payload.quote_tweet_id = args.quote_tweet_id;
-      const r = await client.readWrite.v2.tweet(payload);
+      const r = await client.readWrite.v2.tweet(args.text, args.quote_tweet_id ? { quote_tweet_id: args.quote_tweet_id } : undefined);
+
       return "✅ 推文已發送！ID: " + r.data.id + (args.quote_tweet_id ? "（引用了 " + args.quote_tweet_id + "）" : "") + " 內容: " + args.text;
     }
     case "reply_tweet": {

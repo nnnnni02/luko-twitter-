@@ -53,7 +53,7 @@ function formatTweets(data, includes) {
 
 // ── Tools ──
 const tools = [
-  { name: "post_tweet", description: "我用這個在推特上發文。可帶 quote_tweet_id 做引用轉發。", inputSchema: { type: "object", properties: { text: { type: "string", description: "推文內容" }, quote_tweet_id: { type: "string", description: "可選：要引用的推文ID，帶上就變成引用轉發" } }, required: ["text"] } },
+  { name: "post_tweet", description: "我用這個在推特上發文。可帶 quote_url 做引用轉發。", inputSchema: { type: "object", properties: { text: { type: "string", description: "推文內容" }, quote_tweet_id: { type: "string", description: "可選：要引用的推文ID" }, quote_url: { type: "string", description: "可選：要引用的推文網址，帶上就變成引用轉發" } }, required: ["text"] } },
   { name: "reply_tweet", description: "回覆一條推文。", inputSchema: { type: "object", properties: { text: { type: "string", description: "回覆內容" }, tweet_id: { type: "string", description: "要回覆的推文ID" } }, required: ["text", "tweet_id"] } },
   { name: "read_my_tweets", description: "讀取我自己發過的推文（含推文ID和圖片直鏈）。", inputSchema: { type: "object", properties: { count: { type: "number", description: "要讀幾條" } } } },
   { name: "read_user_tweets", description: "讀取某個用戶的推文（含推文ID和圖片直鏈）。", inputSchema: { type: "object", properties: { username: { type: "string", description: "用戶名（不帶@）" }, count: { type: "number", description: "要讀幾條" } }, required: ["username"] } },
@@ -69,15 +69,18 @@ const tools = [
 async function handleTool(name, args) {
   const client = getClient();
   switch (name) {
-    case "post_tweet": {
-      const r = await client.readWrite.v2.tweet(args.text, args.quote_tweet_id ? { quote_tweet_id: args.quote_tweet_id } : undefined);
-
-      return "✅ 推文已發送！ID: " + r.data.id + (args.quote_tweet_id ? "（引用了 " + args.quote_tweet_id + "）" : "") + " 內容: " + args.text;
-    }
-    case "reply_tweet": {
+        case "post_tweet": {
+      var qid = args.quote_tweet_id ? String(args.quote_tweet_id) : null;
+      if (args.quote_url) { var m = String(args.quote_url).match(/status\/(\d+)/); if (m) qid = m[1]; }
       const body = { text: args.text };
-if (args.quote_tweet_id) body.quote_tweet_id = String(args.quote_tweet_id);
-const r = await client.v2.post('tweets', body);
+      if (qid) body.quote_tweet_id = qid;
+      try {
+        const r = await client.v2.post('tweets', body);
+        return "✅ 推文已發送！ID: " + r.data.id + (qid ? "（引用了 " + qid + "）" : "") + " 內容: " + args.text;
+      } catch (e) {
+        return "❌ 發送失敗。收到的引用ID: " + qid + "。錯誤: " + e.message;
+      }
+    }
 
       return "✅ 已回覆！ID: " + r.data.id;
     }

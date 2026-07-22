@@ -75,7 +75,10 @@ async function handleTool(name, args) {
       return "✅ 推文已發送！ID: " + r.data.id + (args.quote_tweet_id ? "（引用了 " + args.quote_tweet_id + "）" : "") + " 內容: " + args.text;
     }
     case "reply_tweet": {
-      const r = await client.readWrite.v2.reply(args.text, args.tweet_id);
+      const body = { text: args.text };
+if (args.quote_tweet_id) body.quote_tweet_id = String(args.quote_tweet_id);
+const r = await client.v2.post('tweets', body);
+
       return "✅ 已回覆！ID: " + r.data.id;
     }
     case "read_my_tweets": {

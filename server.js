@@ -202,4 +202,9 @@ app.get("/", function(req, res) {
 });
 
 var PORT = process.env.PORT || 3000;
+var RENDER_URL = process.env.RENDER_EXTERNAL_URL;
+if (RENDER_URL) {
+  setInterval(function() { fetch(RENDER_URL + '/').catch(function() {}); }, 10 * 60 * 1000);
+}
+
 app.listen(PORT, function() { console.log("🐕 路可的推特MCP啟動 port " + PORT); });
